@@ -14,18 +14,19 @@ import argparse
 import warnings
 import pandas as pd
 import numpy as np
+import random 
 
 class DoLa:
-    def __init__(self, model_name, device, num_gpus, max_gpu_memory=27):
+    def __init__(self, model_name, device, num_gpus, max_gpu_memory=27, checkpoint_path=None):
         self.model_name = model_name
         self.device = device
         self.num_gpus = num_gpus
         self.stopping_criteria = None
         self.max_gpu_memory = max_gpu_memory
 
-        self.model, self.tokenizer = self.load_model(model_name)
+        self.model, self.tokenizer = self.load_model(model_name, checkpoint_path)
 
-    def load_model(self, model_name):
+    def load_model(self, model_name, checkpoint_path=None):
         if self.device == "cuda":
             kwargs = {"torch_dtype": torch.float16, "offload_folder": f"{model_name}/offload"}
             if self.num_gpus == "auto":
@@ -44,8 +45,20 @@ class DoLa:
         
         tokenizer = AutoTokenizer.from_pretrained(model_name if not 'vicuna' in model_name else 'huggyllama/llama-7b')
         model = AutoModelForCausalLM.from_pretrained(model_name,
+            # auth_token='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',
             low_cpu_mem_usage=True, **kwargs)
 
+        if checkpoint_path:
+            try:
+                loaded_dict = torch.load(checkpoint_path, map_location='cpu')
+            except:
+                raise ValueError(f"failed to load checkpoint from {checkpoint_path}")
+
+            weights = loaded_dict['state'] if 'state' in loaded_dict else loaded_dict['model']
+            print(model.load_state_dict(weights, strict=False))
+            print("Loaded model from checkpoint", flush=True)
+
+        print("KAT: model dtype", model.dtype)
         if self.device == "cuda" and self.num_gpus == 1:
             model.cuda()
         
@@ -61,16 +74,28 @@ class DoLa:
             print("Added stop word: ", stop_word, 'with the ids', stop_word_ids, flush=True)
         self.stopping_criteria.append(LLamaQaStoppingCriteria(list_stop_word_ids))
 
-    def generate(self, input_text, max_new_tokens=256, top_p=0.95, top_k=0, temperature=0.8, mature_layer=None, premature_layer=None, candidate_premature_layers=[], mode='baseline', verbose=True, remove_stop_words=False, relative_top=0.1, **kwargs):
+    def generate(self, input_text, max_new_tokens=256, top_p=0.95, top_k=0, temperature=0.8, mature_layer=None, premature_layer=None, candidate_premature_layers=[], mode='baseline', verbose=False, remove_stop_words=False, relative_top=0.1, seed=None, **kwargs):
         with torch.no_grad():
 
-            input_ids = self.tokenizer(input_text, return_tensors="pt").input_ids.to(self.device)
+            input_ids = self.tokenizer(input_text, add_special_tokens=False, return_tensors="pt").input_ids.to(self.device)
             max_len = input_ids.shape[-1] + max_new_tokens
+
+            if seed is not None:
+                np.random.seed(seed)
+                torch.manual_seed(seed)
+                random.seed(seed)
 
             if mode == 'baseline':
                 outputs = self.model.generate(input_ids, max_length=max_len, num_return_sequences=1,
                                     output_scores=True, return_dict_in_generate=True, dola_decoding=False,
                                     top_p=top_p, top_k=top_k, temperature=temperature, stopping_criteria=self.stopping_criteria, **kwargs)
+                # inputs = self.tokenizer(input_text, add_special_tokens=False, return_tensors="pt").to(self.device)
+                # print("inputs: ",inputs)
+                # if 'token_type_ids' in inputs:
+                #     del inputs['token_type_ids']
+                # outputs = self.model.generate(**inputs, max_length=max_len, num_return_sequences=1,
+                #                             output_scores=True, return_dict_in_generate=True, dola_decoding=False,
+                #                             top_p=top_p, temperature=temperature, **kwargs)
             elif mode == 'dola-static':
                 assert mature_layer is not None, "mature_layer must be specified"
                 assert premature_layer is not None, "premature_layer must be specified"
