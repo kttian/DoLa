@@ -114,6 +114,36 @@ def build_prompt(input_name):
     input_text_prompt = demo + "NAME: " + input_name + ". BIOGRAPHY:"
     return input_text_prompt
 
+def get_questions_dict(split, dataset="bio"):
+    if dataset == "medqa":
+        if split == "train":
+            st, en = 0, 150
+        elif split == "test":
+            st, en = 150, 200
+        else:
+            raise ValueError(f"split {split} not recognized")
+    elif dataset == "bio":
+        if split == "train":
+            st, en = 0, 320
+        elif split == "test":
+            st, en = 320, 400
+        else:
+            raise ValueError(f"split {split} not recognized")
+    else:
+        raise ValueError(f"dataset {dataset} not recognized")
+
+    questions_file = os.path.join("/iris/u/kattian/project_hallucination/factual-rl/", f"dataset_{dataset}", "all_questions_per_topic.json")
+    with open(questions_file, 'r') as f:
+        questions_dict = json.load(f)
+    return questions_dict[st:en]
+
+def get_topics_list(split, dataset="bio"):
+    qd = get_questions_dict(split, dataset)
+    # filter qd to only ones in the wiki
+    qd = [d for d in qd if "in_wiki" not in d or d["in_wiki"]]
+    topics_list = [d["topic"] for d in qd]
+    return qd, topics_list
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-name", type=str, default="huggyllama/llama-7b")
@@ -137,7 +167,7 @@ if __name__ == "__main__":
     parser.add_argument("--repetition_penalty", type=float, default=None)
     parser.add_argument("--relative_top", type=float, default=0.1)
     parser.add_argument("--split", type=str, default="test")
-    parser.add_argument("--size", type=int, default=50)
+    parser.add_argument("--size", type=int, default=72)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--checkpoint_path", type=str, default=None)
     args = parser.parse_args()
@@ -173,12 +203,13 @@ if __name__ == "__main__":
             names = f.read().split('\n')
         return names[:n]
     
-    if args.split == "train":
-        names = get_train_names(n=args.size)
-    elif args.split == "test":
-        names = get_test_names(n=args.size)
+    # if args.split == "train":
+    #     names = get_train_names(n=args.size)
+    # elif args.split == "test":
+    #     names = get_test_names(n=args.size)
+    _, names = get_topics_list(split=args.split, dataset="bio")
     # names = get_names(split=args.split)[:args.size]
-    list_data_dict = names
+    list_data_dict = names[:args.size]
     
     if args.debug:
         list_data_dict = list_data_dict[:10]
@@ -223,6 +254,7 @@ if __name__ == "__main__":
     counter = 0
     for sample in tqdm(list_data_dict):
         if args.checkpoint_path is not None:
+            # if there is a checkpoint path 
             input_text = get_sft_prompt(sample)
         else:
             input_text = build_prompt(sample)
@@ -257,7 +289,7 @@ if __name__ == "__main__":
     output_file = args.output_path if args.shard_id is None else (args.output_path+"_"+str(args.shard_id)+".jsonl")
     result_dict['args'] = vars(args)
     with open(output_file, 'w') as f:
-        json.dump(result_dict, f)
+        json.dump(result_dict, f, indent=4)
     print(f"FINISHED DOLA IN TOTAL TIME: {time.time() - start_time:.3f} seconds")
 
     if args.do_rating:

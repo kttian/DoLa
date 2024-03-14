@@ -160,7 +160,7 @@ if __name__ == "__main__":
     parser.add_argument("--repetition_penalty", type=float, default=None) # changed from None to 1.2
     parser.add_argument("--relative_top", type=float, default=0.1)
     parser.add_argument("--split", type=str, default="test")
-    parser.add_argument("--size", type=int, default=32)
+    parser.add_argument("--size", type=int, default=50)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--checkpoint_path", type=str, default=None)
     args = parser.parse_args()
@@ -272,7 +272,7 @@ if __name__ == "__main__":
     result_dict['args'] = vars(args)
     print(f"Total time: {time.time() - start_time:.3f} seconds")
     with open(output_file, 'w') as f:
-        json.dump(result_dict, f)
+        json.dump(result_dict, f, indent=4)
 
     if args.do_rating:
         from tfqa_gpt3_rating import run_end2end_GPT3, load_json
